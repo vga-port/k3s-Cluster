@@ -1,0 +1,15 @@
+- name: Install Longhorn prerequisites (Debian/Ubuntu)
+  apt:
+    name:
+      - open-iscsi
+      - nfs-common
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Enable + start iscsid
+  systemd:
+    name: iscsid
+    enabled: true
+    state: started
+  when: ansible_os_family == "Debian"

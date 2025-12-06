@@ -1,0 +1,13 @@
+---
+- name: wait for kube-apiserver
+  uri:
+    url: "https://127.0.0.1:6443/healthz"
+    method: GET
+    validate_certs: false
+    return_content: false
+  register: apiserver
+  retries: 30
+  delay: 2
+  until: apiserver.status | default(0) | int == 200
+  failed_when: false
+  when: kube_apiserver_enabled | default(true) | bool

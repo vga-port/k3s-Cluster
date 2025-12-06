@@ -1,0 +1,6 @@
+---
+metallb_enabled: true
+metallb_address_pool:
+  - 192.168.1.100/24-192.168.1.199/24
+ingress_controller: traefik
+cni_provider: canal

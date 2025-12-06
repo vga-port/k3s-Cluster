@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  author: "you"
+  description: "Installs Helm v3 and Kubernetes Python client on k3s controller nodes"
+  license: MIT

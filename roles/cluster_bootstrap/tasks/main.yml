@@ -1,0 +1,84 @@
+---
+- name: Apt update
+  become: true
+  apt:
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Unbreak dpkg config
+  become: true
+  command: dpkg --configure -a
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: Fix broken apt deps
+  become: true
+  command: apt-get -y -f install
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: fixbroken
+  changed_when: "'Setting up' in fixbroken.stdout or 'Setting up' in fixbroken.stderr"
+  failed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: Install pip (+ minimum deps) after fixing apt
+  become: true
+  apt:
+    name:
+      - python3-pip
+      - python3-wheel
+      - python3-setuptools
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+
+- name: Check if k3s binary exists
+  stat:
+    path: /usr/local/bin/k3s
+  register: k3s_bin
+
+- name: Ensure required packages present (Debian)
+  apt:
+    name: ['curl', 'ca-certificates', 'conntrack', 'gnupg']
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Install k3s server
+  shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} sh -s - server --cluster-init --token {{ k3s_token }} {{ k3s_install_options }}
+  args:
+    creates: /usr/local/bin/k3s
+  register: k3s_install
+  changed_when: k3s_install.rc == 0 and "'already' not in (k3s_install.stdout | default(''))"
+  notify: wait for kube-apiserver
+
+- name: Read k3s kubeconfig
+  slurp:
+    src: /etc/rancher/k3s/k3s.yaml
+  register: k3s_kubeconfig_raw
+
+- name: Write patched kubeconfig using real API server address
+  copy:
+    dest: /etc/rancher/k3s/k3s.yaml
+    mode: '0600'
+    content: >-
+      {{
+        (k3s_kubeconfig_raw.content | b64decode)
+        | regex_replace('server: https://127.0.0.1:6443',
+                        'server: https://' ~ ansible_default_ipv4.address ~ ':6443')
+      }}
+
+- name: Ensure kubeconfig is readable by root
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /root/.kube/config
+    remote_src: true
+    mode: "0600"
+  when: k3s_bin.stat.exists
+
+- name: Include optional systemd unit tasks
+  include_tasks: systemd.yml
+  when: k3s_use_systemd_unit | bool

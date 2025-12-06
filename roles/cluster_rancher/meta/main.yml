@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  author: "you"
+  description: "Installs cert-manager and Rancher via Helm on a k3s cluster"
+  license: MIT

@@ -1,0 +1,202 @@
+---
+- name: Assert apps list exists
+  assert:
+    that:
+      - apps is defined
+      - apps is iterable
+    fail_msg: "apps is missing. Define it in your inventory group_vars (e.g. group_vars/apps.yml)."
+
+- name: Set common paths
+  set_fact:
+    kubeconfig_path: "{{ kubeconfig_path | default('/etc/rancher/k3s/k3s.yaml') }}"
+    values_dir_remote: "{{ values_dir_remote | default('/etc/homelab-values') }}"
+    manifests_dir_remote: "{{ manifests_dir_remote | default('/etc/homelab-manifests') }}"
+    helm_bin: "{{ helm_bin | default('/usr/local/bin/helm') }}"
+
+- name: Ensure kubeconfig exists on remote
+  stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_check
+
+- name: Fail if kubeconfig missing
+  fail:
+    msg: "k3s kubeconfig not found at {{ kubeconfig_path }}"
+  when: not kubeconfig_check.stat.exists
+
+- name: Ensure helm binary exists on remote
+  stat:
+    path: "{{ helm_bin }}"
+  register: helm_check
+
+- name: Fail if helm missing
+  fail:
+    msg: "Helm not found at {{ helm_bin }}. Install helm (or set helm_bin to the correct path)."
+  when: not helm_check.stat.exists
+
+- name: Preflight wait for default route (network up)
+  command: ip route show default
+  register: default_route
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: default_route.stdout | length > 0
+
+- name: Preflight wait for DNS resolution of key endpoints
+  command: "getent ahosts {{ item }}"
+  register: dns_check
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: dns_check.rc == 0
+  loop:
+    - charts.bitnami.com
+    - auth.docker.io
+    - registry-1.docker.io
+    - github.com
+
+- name: Build enabled apps list
+  set_fact:
+    enabled_apps: "{{ apps | selectattr('enabled', 'truthy') | list }}"
+
+- name: Ensure values/manifests directories exist on remote
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ values_dir_remote }}"
+    - "{{ manifests_dir_remote }}"
+
+- name: Copy values for enabled apps to remote
+  copy:
+    src: "{{ playbook_dir }}/values/{{ item.values_file | basename }}"
+    dest: "{{ values_dir_remote }}/{{ item.values_file | basename }}"
+    mode: "0644"
+  loop: "{{ enabled_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.values_file is defined and item.values_file | length > 0
+
+# ---- Immich: library PVC manifest (only if immich enabled) ----
+- name: Copy Immich library PVC manifest to remote (if immich enabled)
+  copy:
+    src: "{{ playbook_dir }}/manifests/immich-library-pvc.yaml"
+    dest: "{{ manifests_dir_remote }}/immich-library-pvc.yaml"
+    mode: "0644"
+  when: (enabled_apps | selectattr('name','equalto','immich') | list | length) > 0
+
+- name: Apply Immich library PVC manifest (if immich enabled)
+  command: >
+    kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ manifests_dir_remote }}/immich-library-pvc.yaml
+  changed_when: false
+  when: (enabled_apps | selectattr('name','equalto','immich') | list | length) > 0
+
+# ---- Helm repos: add ONCE per chart-prefix ----
+- name: Build repo map from enabled apps
+  set_fact:
+    repo_map: "{{ repo_map | default({}) | combine({ ((item.chart.split('/'))[0]): item.repo_url }) }}"
+  loop: "{{ enabled_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.repo_url is defined and item.repo_url | length > 0
+
+- name: Add Helm repos (deduped)
+  kubernetes.core.helm_repository:
+    name: "{{ item.key }}"
+    repo_url: "{{ item.value }}"
+    binary_path: "{{ helm_bin }}"
+  loop: "{{ repo_map | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Helm repo update (ONCE)
+  command: "{{ helm_bin }} repo update"
+  changed_when: false
+
+# ---------- Install in STAGES ----------
+# Anything not listed gets installed LAST.
+- name: Define install order (staging)
+  set_fact:
+    ordered_names:
+      - metallb
+      - traefik
+      - longhorn
+      - postgresql
+      - redis
+      - cert-manager
+      - rancher
+      - nextcloud
+      - immich
+      - prometheus
+      - grafana
+
+- name: Build apps_by_name lookup
+  set_fact:
+    apps_by_name: "{{ dict((enabled_apps | default([]) | map(attribute='name') | list) | zip(enabled_apps | default([]))) }}"
+
+- name: Compute ordered enabled apps
+  set_fact:
+    enabled_apps_ordered: >-
+      {{
+        (ordered_names | default([]) | map('extract', apps_by_name) | select('defined') | list)
+        +
+        ((enabled_apps | default([])) | rejectattr('name', 'in', (ordered_names | default([]))) | list)
+      }}
+
+# Stage install: fast apply (no wait) to avoid helium-balloon timeouts.
+- name: Install/upgrade enabled apps (FAST APPLY, no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        [ values_dir_remote ~ '/' ~ (item.values_file | basename) ]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: "{{ kubeconfig_path }}"
+    binary_path: "{{ helm_bin }}"
+    wait: false
+    timeout: "5m0s"
+  loop: "{{ enabled_apps_ordered }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: helm_apply
+  retries: 3
+  delay: 10
+  until: helm_apply is succeeded
+
+# Targeted rollouts: WAY faster than helm --wait for big charts.
+- name: Build rollout targets
+  set_fact:
+    rollout_targets: "{{ rollout_targets | default([]) + (rollout_map[item.name] | default([])) }}"
+  vars:
+    rollout_map:
+      postgresql:
+        - { ns: "database", kind: "statefulset", name: "postgresql", timeout: "10m" }
+      redis:
+        - { ns: "database", kind: "statefulset", name: "redis-master", timeout: "10m" }
+      metallb:
+        - { ns: "metallb-system", kind: "deployment", name: "metallb-controller", timeout: "5m" }
+        - { ns: "metallb-system", kind: "daemonset",  name: "metallb-speaker",   timeout: "5m" }
+      traefik:
+        - { ns: "traefik", kind: "deployment", name: "traefik", timeout: "5m" }
+      longhorn:
+        - { ns: "longhorn-system", kind: "daemonset", name: "longhorn-manager", timeout: "15m" }
+        - { ns: "longhorn-system", kind: "deployment", name: "longhorn-ui", timeout: "10m" }
+      cert-manager:
+        - { ns: "cert-manager", kind: "deployment", name: "cert-manager", timeout: "10m" }
+        - { ns: "cert-manager", kind: "deployment", name: "cert-manager-webhook", timeout: "10m" }
+        - { ns: "cert-manager", kind: "deployment", name: "cert-manager-cainjector", timeout: "10m" }
+      rancher:
+        - { ns: "cattle-system", kind: "deployment", name: "rancher", timeout: "30m" }
+      nextcloud:
+        - { ns: "nextcloud", kind: "deployment", name: "nextcloud", timeout: "20m" }
+      grafana:
+        - { ns: "monitoring", kind: "deployment", name: "grafana", timeout: "10m" }
+  loop: "{{ enabled_apps_ordered }}"
+  loop_control:
+    label: "{{ item.name }}"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Lightweight Kubernetes (k3s)
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/k3s server {{ k3s_extra_args }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+LimitNPROC=1048576
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

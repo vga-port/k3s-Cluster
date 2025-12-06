@@ -1,0 +1,46 @@
+---
+- name: Ensure base packages are installed (Debian)
+  apt:
+    name:
+      - curl
+      - python3
+      - python3-pip
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Ensure base packages are installed (RedHat)
+  yum:
+    name:
+      - curl
+      - python3
+      - python3-pip
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Check if Helm binary already exists
+  stat:
+    path: /usr/local/bin/helm
+  register: helm_bin
+
+- name: Install Helm v3 from upstream (get-helm-3)
+  shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    creates: /usr/local/bin/helm
+  when: not helm_bin.stat.exists
+
+- name: Ensure Kubernetes Python client is installed
+  pip:
+    name: kubernetes
+    state: present
+    executable: pip3
+
+- name: Show Helm version
+  command: /usr/local/bin/helm version
+  register: helm_version
+  changed_when: false
+
+- name: Debug Helm version
+  debug:
+    var: helm_version.stdout

@@ -1,0 +1,20 @@
+---
+# Public URL where you will access Rancher.
+# You MUST create a DNS record that points this to your cluster's LoadBalancer IP.
+rancher_hostname: rancher.example.com
+
+# Number of Rancher replicas
+rancher_replicas: 1
+
+# Initial admin password (you'll change this in the UI later)
+rancher_bootstrap_password: "ChangeThis123!"
+
+# Chart versions (you can update these after checking upstream)
+cert_manager_chart_version: "v1.14.4"
+rancher_chart_version: "2.8.5"
+
+# Path to kubeconfig on the k3s node
+rancher_kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+
+# Path to helm binary installed by your helm_bootstrap role
+rancher_helm_binary: /usr/local/bin/helm

@@ -1,0 +1,5 @@
+adminUser: admin
+adminPassword: admin
+persistence:
+  enabled: true
+  size: 5Gi

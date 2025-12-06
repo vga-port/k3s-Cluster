@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  author: "you"
+  description: "Bootstrap a k3s control-plane for homelab"
+  license: MIT

@@ -1,0 +1,18 @@
+---
+- name: Taint control-plane to prevent workload scheduling
+  kubernetes.core.k8s:
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Node
+      metadata:
+        name: "{{ inventory_hostname }}"
+      spec:
+        taints:
+          - key: node-role.kubernetes.io/control-plane
+            value: "true"
+            effect: NoSchedule
+  when:
+    - inventory_hostname in groups['k3s_masters']
+    - taint_control_plane | default(true) | bool

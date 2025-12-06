@@ -1,0 +1,53 @@
+---
+- name: Ensure Kubernetes Python client is installed
+  pip:
+    name: kubernetes
+    state: present
+    executable: pip3
+
+- name: Ensure kubeconfig exists
+  stat:
+    path: /etc/rancher/k3s/k3s.yaml
+  register: kubeconfig_check
+
+- name: Fail if kubeconfig missing
+  fail:
+    msg: "k3s kubeconfig not found"
+  when: not kubeconfig_check.stat.exists
+
+- name: Check if prometheus app is enabled
+  set_fact:
+    prometheus_enabled: "{{ (apps | selectattr('name', 'equalto', 'prometheus') | selectattr('enabled', 'truthy') | list | length) > 0 }}"
+
+- name: Ensure values directory exists on remote (monitoring)
+  file:
+    path: /etc/homelab-values
+    state: directory
+    mode: '0755'
+  when: prometheus_enabled
+
+- name: Copy Prometheus values to remote
+  copy:
+    src: "{{ playbook_dir }}/values/prometheus.yaml"
+    dest: /etc/homelab-values/prometheus.yaml
+    mode: '0644'
+  when: prometheus_enabled
+
+- name: Add Prometheus Community repo
+  kubernetes.core.helm_repository:
+    name: prometheus-community
+    repo_url: https://prometheus-community.github.io/helm-charts
+    binary_path: /usr/local/bin/helm
+  when: prometheus_enabled
+
+- name: Install kube-prometheus-stack when enabled
+  kubernetes.core.helm:
+    name: kube-prometheus-stack
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: monitoring
+    create_namespace: true
+    values_files:
+      - /etc/homelab-values/prometheus.yaml
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: /usr/local/bin/helm
+  when: prometheus_enabled

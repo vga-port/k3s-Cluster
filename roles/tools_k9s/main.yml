@@ -1,0 +1,28 @@
+---
+- name: Ensure prerequisites
+  apt:
+    name:
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Install k9s binary (amd64)
+  get_url:
+    url: https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz
+    dest: /tmp/k9s.tar.gz
+    mode: "0644"
+
+- name: Extract k9s to /usr/local/bin
+  unarchive:
+    src: /tmp/k9s.tar.gz
+    dest: /usr/local/bin
+    remote_src: true
+    creates: /usr/local/bin/k9s
+
+- name: Ensure k9s is executable
+  file:
+    path: /usr/local/bin/k9s
+    mode: "0755"
+    state: file

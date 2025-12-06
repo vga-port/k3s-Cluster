@@ -1,0 +1,20 @@
+- name: Install/upgrade {{ app.name }} (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ app.name }}"
+    chart_ref: "{{ app.chart }}"
+    chart_version: "{{ app.version | default(omit) }}"
+    release_namespace: "{{ app.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        [ values_dir_remote ~ '/' ~ (app.values_file | basename) ]
+        if (app.values_file is defined and app.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: "{{ kubeconfig_path }}"
+    binary_path: "{{ helm_bin }}"
+    wait: false
+  register: _helm
+  retries: 3
+  delay: 10
+  until: _helm is succeeded

@@ -1,0 +1,346 @@
+---
+- name: Set helm binary path
+  set_fact:
+    helm_bin: "{{ helm_binary_path | default('/usr/local/bin/helm') }}"
+
+- name: Wait for default route (network up)
+  command: ip route show default
+  register: default_route
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: default_route.stdout | length > 0
+
+- name: Wait for DNS resolution of required endpoints
+  command: "getent ahosts {{ item }}"
+  register: dns_check
+  changed_when: false
+  retries: 30
+  delay: 2
+  until: dns_check.rc == 0
+  loop:
+    - charts.bitnami.com
+    - auth.docker.io
+    - registry-1.docker.io
+    - releases.rancher.com
+    - charts.jetstack.io
+
+- name: Ensure kubeconfig exists
+  stat:
+    path: /etc/rancher/k3s/k3s.yaml
+  register: kubeconfig_check
+
+- name: Fail if kubeconfig missing
+  fail:
+    msg: "k3s kubeconfig not found at /etc/rancher/k3s/k3s.yaml"
+  when: not kubeconfig_check.stat.exists
+
+# --- IMPORTANT: your previous "truthy" selection was WRONG if enabled was "False" (string).
+- name: Build enabled apps list (boolean-safe)
+  set_fact:
+    enabled_apps: "{{ (enabled_apps | default([])) + [item] }}"
+  loop: "{{ apps | default([]) }}"
+  when: (item.enabled | default(false)) | bool
+
+- name: Debug enabled apps order (what will install)
+  debug:
+    msg: "{{ enabled_apps | map(attribute='name') | list }}"
+  when: enabled_apps is defined
+
+- name: Ensure values directory exists on remote for apps
+  file:
+    path: /etc/homelab-values
+    state: directory
+    mode: '0755'
+
+- name: Copy values for enabled apps to remote
+  copy:
+    src: "{{ playbook_dir }}/values/{{ item.values_file | basename }}"
+    dest: "/etc/homelab-values/{{ item.values_file | basename }}"
+    mode: '0644'
+  loop: "{{ enabled_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.values_file is defined and item.values_file | length > 0
+
+# Build unique repos by repo "prefix" (e.g. bitnami, traefik) so you don't add duplicates.
+- name: Build unique helm repository map (prefix -> url)
+  set_fact:
+    repo_map: "{{ (repo_map | default({})) | combine({ (item.chart.split('/'))[0]: item.repo_url }) }}"
+  loop: "{{ enabled_apps }}"
+  when: item.repo_url is defined and item.repo_url | length > 0
+
+- name: Add Helm repos (unique by prefix)
+  kubernetes.core.helm_repository:
+    name: "{{ item.key }}"
+    repo_url: "{{ item.value }}"
+    binary_path: "{{ helm_bin }}"
+  loop: "{{ (repo_map | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Helm repo update
+  command: "{{ helm_bin }} repo update"
+  changed_when: false
+
+# --------- STAGING (this is what makes it fast + reliable) ----------
+- name: Define staged install groups
+  set_fact:
+    stage_core: "{{ enabled_apps | selectattr('name','in',['metallb','traefik']) | list }}"
+    stage_storage: "{{ enabled_apps | selectattr('name','in',['longhorn']) | list }}"
+    stage_db: "{{ enabled_apps | selectattr('name','in',['postgresql','redis']) | list }}"
+    stage_apps: "{{ enabled_apps | selectattr('name','in',['nextcloud','immich']) | list }}"
+    stage_monitoring: "{{ enabled_apps | selectattr('name','in',['prometheus','grafana']) | list }}"
+    stage_platform: "{{ enabled_apps | selectattr('name','in',['cert-manager','rancher']) | list }}"
+
+# ---------- Stage 1: CORE (MetalLB, Traefik) ----------
+- name: Install CORE charts (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        ['/etc/homelab-values/' + (item.values_file | basename)]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: "{{ helm_bin }}"
+    update_repo_cache: false
+    wait: false
+  loop: "{{ stage_core }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Wait for MetalLB webhook endpoints so IPAddressPool apply doesn't fail on first run.
+- name: Wait for MetalLB webhook endpoints (prevents first-run webhook errors)
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Endpoints
+    namespace: metallb-system
+    name: metallb-webhook-service
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: metallb_eps
+  retries: 60
+  delay: 2
+  until: metallb_eps.resources|length > 0 and (metallb_eps.resources[0].subsets | default([]) | length) > 0
+  changed_when: false
+  when: stage_core | selectattr('name','equalto','metallb') | list | length > 0
+
+- name: Wait for Traefik Deployment object to exist
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: traefik
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: traefik_deploy_list
+  retries: 120
+  delay: 2
+  until: >
+    (traefik_deploy_list.resources | default([]) |
+     selectattr('metadata.name','equalto','traefik') | list | length) > 0
+  changed_when: false
+
+- name: Wait for Traefik Deployment to be Available
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: traefik
+    name: traefik
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: traefik_deploy
+  retries: 180
+  delay: 2
+  until: >
+    traefik_deploy.resources|length > 0 and
+    (traefik_deploy.resources[0].status.availableReplicas | default(0) | int) >= 1
+  changed_when: false
+
+# ---------- Stage 2: STORAGE (Longhorn) ----------
+- name: Install STORAGE charts (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        ['/etc/homelab-values/' + (item.values_file | basename)]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: "{{ helm_bin }}"
+    update_repo_cache: false
+    wait: false
+  loop: "{{ stage_storage }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Wait for Longhorn manager daemonset ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: DaemonSet
+    namespace: longhorn-system
+    name: longhorn-manager
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: lh_manager
+  retries: 120
+  delay: 3
+  until: >
+    lh_manager.resources|length > 0 and
+    (lh_manager.resources[0].status.numberReady | default(0) | int) >= 1
+  changed_when: false
+  when: stage_storage | length > 0
+
+- name: Wait for Longhorn admission webhook endpoints (prevents PVC/webhook errors)
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Endpoints
+    namespace: longhorn-system
+    name: longhorn-admission-webhook
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: lh_eps
+  retries: 120
+  delay: 3
+  until: lh_eps.resources|length > 0 and (lh_eps.resources[0].subsets | default([]) | length) > 0
+  changed_when: false
+  when: stage_storage | length > 0
+
+# ---------- Stage 3: DATABASES (Postgres + Redis) ----------
+- name: Install DB charts (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        ['/etc/homelab-values/' + (item.values_file | basename)]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: "{{ helm_bin }}"
+    update_repo_cache: false
+    wait: false
+  loop: "{{ stage_db }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ---------- Immich prerequisites (namespace + library PVC) ----------
+- name: Ensure Immich namespace exists
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: immich
+  when: stage_apps | selectattr('name','equalto','immich') | list | length > 0
+
+- name: Ensure Immich library PVC exists (required when values reference existingClaim)
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: immich-library
+        namespace: immich
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: "{{ storage_class_name | default('longhorn') }}"
+        resources:
+          requests:
+            storage: "{{ immich_library_size | default('100Gi') }}"
+  when: stage_apps | selectattr('name','equalto','immich') | list | length > 0
+
+# ---------- Stage 4: APPS (Nextcloud, Immich) ----------
+- name: Install APP charts (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        ['/etc/homelab-values/' + (item.values_file | basename)]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: "{{ helm_bin }}"
+    update_repo_cache: false
+    wait: false
+  loop: "{{ stage_apps }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ---------- Stage 5: MONITORING (optional) ----------
+- name: Install MONITORING charts (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        ['/etc/homelab-values/' + (item.values_file | basename)]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: "{{ helm_bin }}"
+    update_repo_cache: false
+    wait: false
+  loop: "{{ stage_monitoring }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ---------- Stage 6: PLATFORM (cert-manager, rancher) ----------
+- name: Install PLATFORM charts (no wait)
+  kubernetes.core.helm:
+    release_name: "{{ item.name }}"
+    chart_ref: "{{ item.chart }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    create_namespace: true
+    values_files: >-
+      {{
+        ['/etc/homelab-values/' + (item.values_file | basename)]
+        if (item.values_file is defined and item.values_file | length > 0)
+        else []
+      }}
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    binary_path: "{{ helm_bin }}"
+    update_repo_cache: false
+    wait: false
+  loop: "{{ stage_platform }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Wait for cert-manager deployments ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: cert-manager
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+  register: cm_deps
+  retries: 120
+  delay: 3
+  until: >
+    cm_deps.resources|length > 0 and
+    (cm_deps.resources | map(attribute='status.availableReplicas') | map('default',0) | map('int') | min) >= 1
+  changed_when: false
+  when: stage_platform | selectattr('name','equalto','cert-manager') | list | length > 0

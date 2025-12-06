@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  author: "you"
+  description: "Storage layer (Longhorn)"
+  license: MIT

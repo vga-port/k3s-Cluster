@@ -1,0 +1,16 @@
+---
+- name: Render custom k3s systemd unit
+  template:
+    src: k3s.service.j2
+    dest: /etc/systemd/system/k3s.service
+    mode: "0644"
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: true
+
+- name: Enable and restart k3s
+  systemd:
+    name: k3s.service
+    enabled: true
+    state: restarted
