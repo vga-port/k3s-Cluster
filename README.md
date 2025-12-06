@@ -5,6 +5,11 @@ This repo deploys a multi-node k3s cluster using Ansible, then installs common h
 
 It targets home LAN setups (no cloud load balancers).
 
+Currently only tested on:
+
+  ✅ Debian (tested on version 11)
+  ✅ Ubuntu (tested on version 22.04)
+
 
 ## What it deploys
 
