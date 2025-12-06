@@ -149,7 +149,6 @@ Configure your main vars in `group_vars/all.yml` (or your repo’s var file).
 
 Things you must set correctly:
 
-- `k3s_token`
 - `k3s_server_ip`
 - MetalLB address pool range (must not overlap)
 - Which apps are enabled
