@@ -10,7 +10,11 @@ It targets home LAN setups (no cloud load balancers).
 
 
 Core cluster:
+ets home LAN setups (no cloud load balancers).
 
+What it deploys
+
+Core cluster:
 - k3s controller (master)
 
 - k3s workers joining the cluster
@@ -285,3 +289,12 @@ kubectl get pods -A
 kubectl get events -A --sort-by=.metadata.creationTimestamp | tail -n 50
 ```
 Redact any secrets.
+
+# Thank you!
+
+This repo would not of been possible without the use of the following:
+
+- k3s-io/k3s-ansible
+- timothystewart6/k3s-ansible 
+- geerlingguy/turing-pi-cluster
+- 212850a/k3s-ansible
