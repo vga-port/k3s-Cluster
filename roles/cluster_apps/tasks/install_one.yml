@@ -1,4 +1,4 @@
-- name: Install/upgrade {{ app.name }} (no wait)
+- name: Install/upgrade {{ app.name }}
   kubernetes.core.helm:
     release_name: "{{ app.name }}"
     chart_ref: "{{ app.chart }}"
