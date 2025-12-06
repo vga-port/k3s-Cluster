@@ -8,6 +8,7 @@ It targets home LAN setups (no cloud load balancers).
 Currently only tested on:
 
   ✅ Debian (tested on version 11)
+  
   ✅ Ubuntu (tested on version 22.04)
 
 
