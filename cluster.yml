@@ -1,0 +1,63 @@
+- name: Bootstrap k3s homelab cluster
+  hosts: k3s_masters
+  gather_facts: yes
+  become: yes
+  roles:
+    - role: cluster_bootstrap
+
+- name: Join workers to cluster
+  hosts: k3s_workers
+  gather_facts: yes
+  become: yes
+  roles:
+    - role: cluster_workers
+
+- name: Apply cluster policy (taints, labels)
+  hosts: k3s_masters
+  gather_facts: no
+  become: yes
+  roles:
+    - role: cluster_policy
+
+- name: Bootstrap Helm and Kubernetes tooling
+  hosts: k3s_masters
+  gather_facts: yes
+  become: yes
+  roles:
+    - role: helm_bootstrap
+
+- name: Configure network and storage
+  hosts: k3s_masters
+  gather_facts: no
+  become: yes
+  roles:
+    - role: cluster_network
+    - role: cluster_storage
+
+- name: Install apps
+  hosts: k3s_masters
+  gather_facts: no
+  become: yes
+  roles:
+    - role: cluster_apps
+
+- name: Install monitoring stack (optional)
+  hosts: k3s_masters
+  gather_facts: no
+  become: yes
+  roles:
+    - role: cluster_monitoring
+
+- name: Install Rancher (optional)
+  hosts: k3s_masters
+  gather_facts: no
+  become: yes
+  roles:
+    - role: cluster_rancher
+
+- name: Install tooling (k9s)
+  hosts: k3s_masters
+  become: yes
+  gather_facts: no
+  roles:
+    - role: tools_k9s
