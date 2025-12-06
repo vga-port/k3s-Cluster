@@ -36,7 +36,7 @@
   when: not kubeconfig_check.stat.exists
 
 # --- IMPORTANT: your previous "truthy" selection was WRONG if enabled was "False" (string).
-- name: Build enabled apps list (boolean-safe)
+- name: Build enabled apps list
   set_fact:
     enabled_apps: "{{ (enabled_apps | default([])) + [item] }}"
   loop: "{{ apps | default([]) }}"
@@ -64,13 +64,13 @@
   when: item.values_file is defined and item.values_file | length > 0
 
 # Build unique repos by repo "prefix" (e.g. bitnami, traefik) so you don't add duplicates.
-- name: Build unique helm repository map (prefix -> url)
+- name: Build unique helm repository map
   set_fact:
     repo_map: "{{ (repo_map | default({})) | combine({ (item.chart.split('/'))[0]: item.repo_url }) }}"
   loop: "{{ enabled_apps }}"
   when: item.repo_url is defined and item.repo_url | length > 0
 
-- name: Add Helm repos (unique by prefix)
+- name: Add Helm repos
   kubernetes.core.helm_repository:
     name: "{{ item.key }}"
     repo_url: "{{ item.value }}"
@@ -94,7 +94,7 @@
     stage_platform: "{{ enabled_apps | selectattr('name','in',['cert-manager','rancher']) | list }}"
 
 # ---------- Stage 1: CORE (MetalLB, Traefik) ----------
-- name: Install CORE charts (no wait)
+- name: Install CORE charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
@@ -116,7 +116,7 @@
     label: "{{ item.name }}"
 
 # Wait for MetalLB webhook endpoints so IPAddressPool apply doesn't fail on first run.
-- name: Wait for MetalLB webhook endpoints (prevents first-run webhook errors)
+- name: Wait for MetalLB webhook endpoints
   kubernetes.core.k8s_info:
     api_version: v1
     kind: Endpoints
@@ -160,7 +160,7 @@
   changed_when: false
 
 # ---------- Stage 2: STORAGE (Longhorn) ----------
-- name: Install STORAGE charts (no wait)
+- name: Install STORAGE charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
@@ -197,7 +197,7 @@
   changed_when: false
   when: stage_storage | length > 0
 
-- name: Wait for Longhorn admission webhook endpoints (prevents PVC/webhook errors)
+- name: Wait for Longhorn admission webhook endpoints
   kubernetes.core.k8s_info:
     api_version: v1
     kind: Endpoints
@@ -212,7 +212,7 @@
   when: stage_storage | length > 0
 
 # ---------- Stage 3: DATABASES (Postgres + Redis) ----------
-- name: Install DB charts (no wait)
+- name: Install DB charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
@@ -245,7 +245,7 @@
         name: immich
   when: stage_apps | selectattr('name','equalto','immich') | list | length > 0
 
-- name: Ensure Immich library PVC exists (required when values reference existingClaim)
+- name: Ensure Immich library PVC exists
   kubernetes.core.k8s:
     state: present
     kubeconfig: /etc/rancher/k3s/k3s.yaml
@@ -265,7 +265,7 @@
   when: stage_apps | selectattr('name','equalto','immich') | list | length > 0
 
 # ---------- Stage 4: APPS (Nextcloud, Immich) ----------
-- name: Install APP charts (no wait)
+- name: Install APP charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
@@ -287,7 +287,7 @@
     label: "{{ item.name }}"
 
 # ---------- Stage 5: MONITORING (optional) ----------
-- name: Install MONITORING charts (no wait)
+- name: Install MONITORING charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
@@ -309,7 +309,7 @@
     label: "{{ item.name }}"
 
 # ---------- Stage 6: PLATFORM (cert-manager, rancher) ----------
-- name: Install PLATFORM charts (no wait)
+- name: Install PLATFORM charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
