@@ -33,7 +33,7 @@
     msg: "Helm not found at {{ helm_bin }}. Install helm (or set helm_bin to the correct path)."
   when: not helm_check.stat.exists
 
-- name: Preflight wait for default route (network up)
+- name: Preflight wait for default route
   command: ip route show default
   register: default_route
   changed_when: false
@@ -100,7 +100,7 @@
     label: "{{ item.name }}"
   when: item.repo_url is defined and item.repo_url | length > 0
 
-- name: Add Helm repos (deduped)
+- name: Add Helm repos
   kubernetes.core.helm_repository:
     name: "{{ item.key }}"
     repo_url: "{{ item.value }}"
@@ -109,13 +109,13 @@
   loop_control:
     label: "{{ item.key }}"
 
-- name: Helm repo update (ONCE)
+- name: Helm repo update
   command: "{{ helm_bin }} repo update"
   changed_when: false
 
 # ---------- Install in STAGES ----------
 # Anything not listed gets installed LAST.
-- name: Define install order (staging)
+- name: Define install order
   set_fact:
     ordered_names:
       - metallb
@@ -144,7 +144,7 @@
       }}
 
 # Stage install: fast apply (no wait) to avoid helium-balloon timeouts.
-- name: Install/upgrade enabled apps (FAST APPLY, no wait)
+- name: Install/upgrade enabled apps
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
     chart_ref: "{{ item.chart }}"
