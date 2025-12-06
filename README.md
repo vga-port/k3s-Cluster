@@ -22,35 +22,24 @@ What it deploys
 
 Core cluster:
 - k3s controller (master)
-
 - k3s workers joining the cluster
-
-optional control-plane tainting/labels
+- optional control-plane tainting/labels
 
 Platform services:
 
 - MetalLB (L2 LoadBalancer IPs)
-
 - Traefik (Ingress)
-
 - Longhorn (storage)
 
 Apps (configurable):
 
 - PostgreSQL (Bitnami)
-
 - Redis (Bitnami)
-
 - Nextcloud
-
 - Immich (+ required library PVC manifest)
-
 - kube-prometheus-stack
-
 - Grafana
-
 - cert-manager
-
 - Rancher
 
 Tooling:
