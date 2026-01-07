@@ -106,8 +106,8 @@ Each node needs:
 # Quick start
 ### 1) Clone
 ```bash
-git clone <YOUR_REPO_URL>
-cd <YOUR_REPO_DIR>
+git clone (https://github.com/vga-port/k3s-Cluster.git)
+cd k3s-Cluster
 ```
 
 ### 2) Configure inventory
