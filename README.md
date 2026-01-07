@@ -106,7 +106,7 @@ Each node needs:
 # Quick start
 ### 1) Clone
 ```bash
-git clone (https://github.com/vga-port/k3s-Cluster.git)
+git clone https://github.com/vga-port/k3s-Cluster.git
 cd k3s-Cluster
 ```
 
