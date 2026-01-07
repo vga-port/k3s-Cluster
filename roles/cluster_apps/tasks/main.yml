@@ -175,8 +175,6 @@
         - { ns: "cert-manager", kind: "deployment", name: "cert-manager-cainjector", timeout: "10m" }
       rancher:
         - { ns: "cattle-system", kind: "deployment", name: "rancher", timeout: "30m" }
-      nextcloud:
-        - { ns: "nextcloud", kind: "deployment", name: "nextcloud", timeout: "20m" }
       grafana:
         - { ns: "monitoring", kind: "deployment", name: "grafana", timeout: "10m" }
   loop: "{{ enabled_apps_ordered }}"
