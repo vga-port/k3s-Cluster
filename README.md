@@ -127,7 +127,7 @@ k3s_masters
 k3s_workers
 ```
 
-Test connectivity (ensure that you are in the `k3s-Clsuter` directory):
+Test connectivity (ensure that you are in the `k3s-Cluster` directory):
 
 ```bash
 ansible -i inventory/homelab/hosts.ini k3s_cluster -m ping
