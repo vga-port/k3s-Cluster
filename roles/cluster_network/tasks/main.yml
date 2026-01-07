@@ -88,8 +88,6 @@
   set_fact:
     stage_core: "{{ enabled_apps | selectattr('name','in',['metallb','traefik']) | list }}"
     stage_storage: "{{ enabled_apps | selectattr('name','in',['longhorn']) | list }}"
-    stage_db: "{{ enabled_apps | selectattr('name','in',['postgresql','redis']) | list }}"
-    stage_apps: "{{ enabled_apps | selectattr('name','in',['nextcloud','immich']) | list }}"
     stage_monitoring: "{{ enabled_apps | selectattr('name','in',['prometheus','grafana']) | list }}"
     stage_platform: "{{ enabled_apps | selectattr('name','in',['cert-manager','rancher']) | list }}"
 
@@ -211,82 +209,7 @@
   changed_when: false
   when: stage_storage | length > 0
 
-# ---------- Stage 3: DATABASES (Postgres + Redis) ----------
-- name: Install DB charts
-  kubernetes.core.helm:
-    release_name: "{{ item.name }}"
-    chart_ref: "{{ item.chart }}"
-    chart_version: "{{ item.chart_version | default(omit) }}"
-    release_namespace: "{{ item.namespace }}"
-    create_namespace: true
-    values_files: >-
-      {{
-        ['/etc/homelab-values/' + (item.values_file | basename)]
-        if (item.values_file is defined and item.values_file | length > 0)
-        else []
-      }}
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    binary_path: "{{ helm_bin }}"
-    update_repo_cache: false
-    wait: false
-  loop: "{{ stage_db }}"
-  loop_control:
-    label: "{{ item.name }}"
-
-# ---------- Immich prerequisites (namespace + library PVC) ----------
-- name: Ensure Immich namespace exists
-  kubernetes.core.k8s:
-    state: present
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    definition:
-      apiVersion: v1
-      kind: Namespace
-      metadata:
-        name: immich
-  when: stage_apps | selectattr('name','equalto','immich') | list | length > 0
-
-- name: Ensure Immich library PVC exists
-  kubernetes.core.k8s:
-    state: present
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    definition:
-      apiVersion: v1
-      kind: PersistentVolumeClaim
-      metadata:
-        name: immich-library
-        namespace: immich
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: "{{ storage_class_name | default('longhorn') }}"
-        resources:
-          requests:
-            storage: "{{ immich_library_size | default('100Gi') }}"
-  when: stage_apps | selectattr('name','equalto','immich') | list | length > 0
-
-# ---------- Stage 4: APPS (Nextcloud, Immich) ----------
-- name: Install APP charts
-  kubernetes.core.helm:
-    release_name: "{{ item.name }}"
-    chart_ref: "{{ item.chart }}"
-    chart_version: "{{ item.chart_version | default(omit) }}"
-    release_namespace: "{{ item.namespace }}"
-    create_namespace: true
-    values_files: >-
-      {{
-        ['/etc/homelab-values/' + (item.values_file | basename)]
-        if (item.values_file is defined and item.values_file | length > 0)
-        else []
-      }}
-    kubeconfig: /etc/rancher/k3s/k3s.yaml
-    binary_path: "{{ helm_bin }}"
-    update_repo_cache: false
-    wait: false
-  loop: "{{ stage_apps }}"
-  loop_control:
-    label: "{{ item.name }}"
-
-# ---------- Stage 5: MONITORING (optional) ----------
+# ---------- Stage 3: MONITORING ----------
 - name: Install MONITORING charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
@@ -308,7 +231,7 @@
   loop_control:
     label: "{{ item.name }}"
 
-# ---------- Stage 6: PLATFORM (cert-manager, rancher) ----------
+# ---------- Stage 4: PLATFORM (cert-manager, rancher) ----------
 - name: Install PLATFORM charts
   kubernetes.core.helm:
     release_name: "{{ item.name }}"
