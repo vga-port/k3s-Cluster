@@ -112,7 +112,7 @@ cd k3s-Cluster
 
 ### 2) Configure inventory
 
-Edit `inventory/hosts.ini`:
+Edit `inventory/homelab/hosts.ini`:
 
 ```ini
 [k3s_masters]
@@ -145,7 +145,7 @@ Things you must set correctly:
 
 ### 4) Run install
 ```bash
-ansible-playbook -i inventory/hosts.ini cluster.yml -K
+ansible-playbook -i inventory/homelab/hosts.ini cluster.yml -K
 ```
 
 # Values + manifests
