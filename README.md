@@ -272,7 +272,7 @@ Then re-run the playbook.
 If you raise an issue, include:
 
 ```bash
-ansible-playbook -i inventory/hosts.ini cluster.yml -K -vvv
+ansible-playbook -i inventory/homelab/hosts.ini cluster.yml -K -vvv
 ```
 
 And:
