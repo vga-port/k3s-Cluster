@@ -130,7 +130,7 @@ k3s_workers
 Test connectivity:
 
 ```bash
-ansible -i inventory/hosts.ini k3s_cluster -m ping
+ansible -i inventory/homelab/hosts.ini k3s_cluster -m ping
 ```
 ### 3) Configure variables
 
