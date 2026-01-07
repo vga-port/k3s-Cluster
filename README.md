@@ -1,4 +1,4 @@
-# k3s Homelab Cluster (Ansible) - MetalLB + Traefik + Longhorn + Apps + Rancher
+# K3s Homelab Cluster (Ansible) - MetalLB + Traefik + Longhorn + Apps + Rancher
 
 
 This repo deploys a multi-node k3s cluster using Ansible, then installs common homelab components using Helm and kubectl through a staged set of roles.
