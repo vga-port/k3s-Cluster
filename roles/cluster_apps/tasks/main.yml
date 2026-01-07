@@ -77,20 +77,6 @@
     label: "{{ item.name }}"
   when: item.values_file is defined and item.values_file | length > 0
 
-# ---- Immich: library PVC manifest (only if immich enabled) ----
-- name: Copy Immich library PVC manifest to remote (if immich enabled)
-  copy:
-    src: "{{ playbook_dir }}/manifests/immich-library-pvc.yaml"
-    dest: "{{ manifests_dir_remote }}/immich-library-pvc.yaml"
-    mode: "0644"
-  when: (enabled_apps | selectattr('name','equalto','immich') | list | length) > 0
-
-- name: Apply Immich library PVC manifest (if immich enabled)
-  command: >
-    kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ manifests_dir_remote }}/immich-library-pvc.yaml
-  changed_when: false
-  when: (enabled_apps | selectattr('name','equalto','immich') | list | length) > 0
-
 # ---- Helm repos: add ONCE per chart-prefix ----
 - name: Build repo map from enabled apps
   set_fact:
@@ -121,12 +107,8 @@
       - metallb
       - traefik
       - longhorn
-      - postgresql
-      - redis
       - cert-manager
       - rancher
-      - nextcloud
-      - immich
       - prometheus
       - grafana
 
